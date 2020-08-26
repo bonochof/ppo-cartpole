@@ -31,3 +31,79 @@ Tmax = 3 * N_WORKERS
 EPS_START = 0.5
 EPS_END = 0.0
 EPS_STEPS = 200 * N_WORKERS
+
+class Brain:
+    def __init__(self):
+        with tf.name_scope("brain"):
+            self.train_queue = [[], [], [], [], []]  # s, a, r, s', s' terminal mask
+            K.set_session(SESS)
+            self.model = self._build_model()
+            self.opt = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE)
+            self.prop_old = 1
+            self.graph = self.build_graph()
+
+    def _build_model(self):
+        l_input = Input(batch_shape=(None, NUM_STATES))
+        l_dense = Dense(16, activation='relu')(l_input)
+        out_actions = Dense(NUM_ACTIONS, activation='softmax')(l_dense)
+        out_value = Dense(1, activation='linear')(l_dense)
+        model = Model(inputs=[l_input], outputs=[out_actions, out_value])
+        model._make_predict_function()
+        plot_model(model, to_file='PPO.png', show_shapes=True)
+        return model
+
+    def build_graph(self):
+        self.s_t = tf.placeholder(tf.float32, shape=(None, NUM_STATES))
+        self.a_t = tf.placeholder(tf.float32, shape=(None, NUM_ACTIONS))
+        self.r_t = tf.placeholder(tf.float32, shape=(None, 1))
+        p, v = self.model(self.s_t)
+
+        # loss function
+        advantage = tf.subtract(self.r_t, v)
+        self.prob = tf.multiply(p, self.a_t) + 1e-10
+        r_theta = tf.div(self.prob, self.prop_old)
+        advantage_CPI = tf.multiply(r_theta, tf.stop_gradient(advantage))
+        r_clip = tf.clip_by_value(r_theta, r_theta-EPSILON, r_theta+EPSILON)
+        clipped_advantage_CPI = tf.multiply(r_clip, tf.stop_gradient(advantage))
+        loss_CLIP = -tf.reduce_mean(tf.minimum(advantage_CPI, clipped_advantage_CPI), axis=1, keep_dims=True)
+        loss_value = LOSS_V * tf.square(advantage)
+        entropy = LOSS_ENTROPY * tf.reduce_sum(p * tf.log(p + 1e-10), axis=1, keep_dims=True)
+        self.loss_total = tf.reduce_mean(loss_CLIP + loss_value - entropy)
+        minimize = self.opt.minimize(self.loss_total)
+        return minimize
+
+    def update_parameter_server(self):
+        if len(self.train_queue[0]) < MIN_BATCH:
+            return
+
+        s, a, r, s_, s_mask = self.train_queue
+        self.train_queue = [[], [], [], [], []]
+        s = np.vstack(s)
+        a = np.vstack(a)
+        r = np.vstack(r)
+        s_ = np.vstack(s_)
+        s_mask = np.vstack(s_mask)
+
+        _, v = self.model.predict(s_)
+        r = r + GAMMA_N * v * s_mask
+        feed_dict = {self.s_t: s, self.a_t: a, self.r_t: r}
+
+        minimize = self.graph
+        SESS.run(minimize, feed_dict)
+        self.prob_old = self.prob
+
+    def predict_p(self, s):
+        p, v = self.model.predict(s)
+        return p
+
+    def train_push(self, s, a, r, s_):
+        self.train_queue[0].append(s)
+        self.train_queue[1].append(a)
+        self.train_queue[2].append(r)
+
+        if s_ is None:
+            self.train_queue[3].append(NONE_STATE)
+            self.train_queue[4].append(0.)
+        else:
+            self.train_queue[3].append(s_)
+            self.train_queue[4].append(1.)
