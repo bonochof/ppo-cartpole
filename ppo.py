@@ -210,3 +210,20 @@ class Environment:
         if self.total_reward_vec.mean() > 199:
             isLearned = True
             time.sleep(2.0)
+
+class WorkerThread:
+    def __init__(self, thread_name, thread_type, brain):
+        self.environment = Environment(thread_name, thread_type, brain)
+        self.thread_type = thread_type
+
+    def run(self):
+        while True:
+            if not(isLearned) and self.thread_type is 'learning':
+                self.environment.run()
+            if not(isLearned) and self.thread_type is 'test':
+                time.sleep(1.0)
+            if isLearned and self.thread_type is 'learning':
+                time.sleep(3.0)
+            if isLearned and self.thread_type is 'test':
+                time.sleep(3.0)
+                self.environment.run()
