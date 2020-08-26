@@ -107,3 +107,49 @@ class Brain:
         else:
             self.train_queue[3].append(s_)
             self.train_queue[4].append(1.)
+
+class Agent:
+    def __init__(self, brain):
+        self.brain = brain
+        self.memory = []
+        self.R = 0.
+
+    def act(self, s):
+        if frames >= EPS_STEPS:
+            eps = EPS_END
+        else:
+            eps = EPS_START + frames * (EPS_END - EPS_START) / EPS_STEPS
+
+        if random.random() < eps:
+            return random.randint(0, NUM_ACTIONS - 1)
+        else:
+            s = np.array([s])
+            p = self.brain.predict_p(s)
+            a = np.random.choice(NUM_ACTIONS, p=p[0])
+            return a
+
+    def advantage_push_brain(self, s, a, r, s_):
+        def get_sample(memory, n):
+            s, a, _, _ = memory[0]
+            _, _, _, s_ = memory[n - 1]
+            return s, a, self.R, s_
+
+        a_cats = np.zeros(NUM_ACTIONS)
+        a_cats[a] = 1
+        self.memory.append((s, a_cats, r, s_))
+        self.R = (self.R + r * GAMMA_N) / GAMMA
+
+        if s_ is None:
+            while len(self.memory) > 0:
+                n = len(self.memory)
+                s, a, r, s_ = get_sample(self.memory, n)
+                self.brain.train_push(s, a, r, s_)
+                self.R = (self.R - self.memory[0][2]) / GAMMA
+                self.memory.pop(0)
+            self.R = 0
+
+        if len(self.memory) >= N_STEP_RETURN:
+            s, a, r, s_ = get_sample(self.memory, N_STEP_RETURN)
+            self.brain.train_push(s, a, r, s_)
+            self.R = self.R - self.memory[0][2]
+            self.memory.pop(0)
