@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 import gym, time, random, threading
 from gym import wrappers
@@ -227,3 +228,24 @@ class WorkerThread:
             if isLearned and self.thread_type is 'test':
                 time.sleep(3.0)
                 self.environment.run()
+
+frames = 0
+isLearned = False
+SESS = tf.Session()
+
+with tf.device("/cpu:0"):
+    brain = Brain()
+    threads = []
+    for i in range(N_WORKERS):
+        thread_name = "local_thread" + str(i + 1)
+        threads.append(WorkerThread(thread_name=thread_name, thread_type="learning", brain=brain))
+    threads.append(WorkerThread(thread_name="test_thread", thread_type="test", brain=brain))
+
+COORD = tf.train.Coordinator()
+SESS.run(tf.global_variables_initializer())
+
+running_threads = []
+for worker in threads:
+    job = lambda: worker.run()
+    t = threading.Thread(target=job)
+    t.start()
