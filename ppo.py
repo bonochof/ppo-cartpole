@@ -33,6 +33,11 @@ EPS_START = 0.5
 EPS_END = 0.0
 EPS_STEPS = 200 * N_WORKERS
 
+#--- global variable
+frames = 0
+isLearned = False
+SESS = tf.Session()
+
 class Brain:
     def __init__(self):
         with tf.name_scope("brain"):
@@ -178,7 +183,7 @@ class Environment:
         while True:
             if self.thread_type is 'test':
                 self.env.render()
-                time.sleep(0.1)
+                time.sleep(0.01)
 
             a = self.agent.act(s)
             s_, r, done, info = self.env.step(a)
@@ -229,23 +234,25 @@ class WorkerThread:
                 time.sleep(3.0)
                 self.environment.run()
 
-frames = 0
-isLearned = False
-SESS = tf.Session()
+def main():
+    with tf.device("/cpu:0"):
+        brain = Brain()
+        threads = []
+        for i in range(N_WORKERS):
+            thread_name = "local_thread" + str(i + 1)
+            threads.append(WorkerThread(thread_name=thread_name, thread_type="learning", brain=brain))
+        threads.append(WorkerThread(thread_name="test_thread", thread_type="test", brain=brain))
 
-with tf.device("/cpu:0"):
-    brain = Brain()
-    threads = []
-    for i in range(N_WORKERS):
-        thread_name = "local_thread" + str(i + 1)
-        threads.append(WorkerThread(thread_name=thread_name, thread_type="learning", brain=brain))
-    threads.append(WorkerThread(thread_name="test_thread", thread_type="test", brain=brain))
+    COORD = tf.train.Coordinator()
+    SESS.run(tf.global_variables_initializer())
 
-COORD = tf.train.Coordinator()
-SESS.run(tf.global_variables_initializer())
+    running_threads = []
+    for worker in threads:
+        job = lambda: worker.run()
+        t = threading.Thread(target=job)
+        t.start()
+        running_threads.append(t)
+    COORD.join(running_threads)
 
-running_threads = []
-for worker in threads:
-    job = lambda: worker.run()
-    t = threading.Thread(target=job)
-    t.start()
+if __name__ == "__main__":
+    main()
