@@ -153,3 +153,60 @@ class Agent:
             self.brain.train_push(s, a, r, s_)
             self.R = self.R - self.memory[0][2]
             self.memory.pop(0)
+
+class Environment:
+    total_reward_vec = np.zeros(10)
+    count_trial_each_thread = 0
+
+    def __init__(self, name, thread_type, brain):
+        self.name = name
+        self.thread_type = thread_type
+        self.env = gym.make(ENV)
+        self.agent = Agent(brain)
+
+    def run(self):
+        global frames
+        global isLearned
+
+        if (self.thread_type is 'test') and (self.count_trial_each_thread == 0):
+            self.env.reset()
+
+        s = self.env.reset()
+        R = 0
+        step = 0
+        while True:
+            if self.thread_type is 'test':
+                self.env.render()
+                time.sleep(0.1)
+
+            a = self.agent.act(s)
+            s_, r, done, info = self.env.step(a)
+            step += 1
+            frames += 1
+
+            r = 0
+            if done:
+                s_ = None
+                if step < 199:
+                    r = -1
+                else:
+                    r = 1
+
+            self.agent.advantage_push_brain(s, a, r, s_)
+
+            s = s_
+            R += r
+            if done or (frames % Tmax == 0):
+                if not(isLearned) and self.thread_type is 'learning':
+                    self.agent.brain.update_parameter_server()
+
+            if done:
+                self.total_reward_vec = np.hstack((self.total_reward_vec[1:], step))
+                self.count_trial_each_thread += 1
+                break
+
+        print("Thread: " + self.name + ", Trial: " + str(self.count_trial_each_thread) + ", Step: " + str(step) + ", Step(mean): " + str(self.total_reward_vec.mean()))
+
+        if self.total_reward_vec.mean() > 199:
+            isLearned = True
+            time.sleep(2.0)
