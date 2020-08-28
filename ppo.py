@@ -46,7 +46,7 @@ class Brain:
             self.model = self._build_model()
             self.opt = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE)
             self.prop_old = 1
-            self.graph = self.build_graph()
+            self.graph = self._build_graph()
 
     def _build_model(self):
         l_input = Input(batch_shape=(None, NUM_STATES))
@@ -58,7 +58,7 @@ class Brain:
         plot_model(model, to_file='PPO.png', show_shapes=True)
         return model
 
-    def build_graph(self):
+    def _build_graph(self):
         self.s_t = tf.placeholder(tf.float32, shape=(None, NUM_STATES))
         self.a_t = tf.placeholder(tf.float32, shape=(None, NUM_ACTIONS))
         self.r_t = tf.placeholder(tf.float32, shape=(None, 1))
@@ -69,16 +69,25 @@ class Brain:
         self.prob = tf.multiply(p, self.a_t) + 1e-10
         r_theta = tf.div(self.prob, self.prop_old)
         advantage_CPI = tf.multiply(r_theta, tf.stop_gradient(advantage))
+
+        # calc clipped loss and select minimun advantage
         r_clip = tf.clip_by_value(r_theta, r_theta-EPSILON, r_theta+EPSILON)
         clipped_advantage_CPI = tf.multiply(r_clip, tf.stop_gradient(advantage))
         loss_CLIP = -tf.reduce_mean(tf.minimum(advantage_CPI, clipped_advantage_CPI), axis=1, keep_dims=True)
+
+        # calc value error
         loss_value = LOSS_V * tf.square(advantage)
+
+        # calc enttory
         entropy = LOSS_ENTROPY * tf.reduce_sum(p * tf.log(p + 1e-10), axis=1, keep_dims=True)
+
+        # define to update weight
         self.loss_total = tf.reduce_mean(loss_CLIP + loss_value - entropy)
         minimize = self.opt.minimize(self.loss_total)
         return minimize
 
     def update_parameter_server(self):
+        # no update when do not pool data
         if len(self.train_queue[0]) < MIN_BATCH:
             return
 
@@ -90,6 +99,7 @@ class Brain:
         s_ = np.vstack(s_)
         s_mask = np.vstack(s_mask)
 
+        # set v to 0 where s_ is terminal state
         _, v = self.model.predict(s_)
         r = r + GAMMA_N * v * s_mask
         feed_dict = {self.s_t: s, self.a_t: a, self.r_t: r}
@@ -140,9 +150,12 @@ class Agent:
             _, _, _, s_ = memory[n - 1]
             return s, a, self.R, s_
 
+        # make an ont-hot coding action
         a_cats = np.zeros(NUM_ACTIONS)
         a_cats[a] = 1
         self.memory.append((s, a_cats, r, s_))
+
+        # calc total reward
         self.R = (self.R + r * GAMMA_N) / GAMMA
 
         if s_ is None:
